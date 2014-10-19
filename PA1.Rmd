@@ -1,0 +1,163 @@
+---
+title: "Reproducible Research: Peer Assessment 1"
+output: 
+  html_document:
+    keep_md: true
+---
+## Overview
+
+This report runs an analysis on the activity data given on the assignment page. 
+The introduction to the data set is the following:
+
+>It is now possible to collect a large amount of data about personal movement using activity monitoring devices such as a Fitbit, Nike Fuelband, or Jawbone Up. These type of devices are part of the “quantified self” movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. But these data remain under-utilized both because the raw data are hard to obtain and there is a lack of statistical methods and software for processing and interpreting the data. This assignment makes use of data from a personal activity monitoring device. This device collects data at 5 minute intervals through out the day. The data consists of two months of data from an anonymous individual collected during the months of October and November, 2012 and include the number of steps taken in 5 minute intervals each day.
+
+### Variable description 
+
+* **steps**: Number of steps taking in a 5-minute interval (missing values are coded as NA)
+
+* **date**: The date on which the measurement was taken in YYYY-MM-DD format
+
+* **interval**: Identifier for the 5-minute interval in which measurement was taken
+
+## Loading and preprocessing the data
+
+To read the file into R, it is necessary to unzip it first. The zip has to be in the directory of this file. 
+
+```{r, echo = TRUE}
+unzip("activity.zip")
+```
+
+Now the extracted CSV file lies in the directory of the archive. Next, this file is loaded into R into variable `data`. Also the structure of the data is checked.
+
+```{r, echo=TRUE}
+data <- read.csv("activity.csv")
+str(data)
+```
+
+The date variable seems to be seen as a factor, not a date. This can be changed:
+
+```{r, echo=TRUE}
+as.Date(data$date)->data$date
+str(data)
+```
+
+Now the data set is clean and ready for analysis.
+
+## What is mean total number of steps taken per day?
+
+The structure of the data unviels that there are NA's in the steps variable. These entries need to be excluded from the analysis with the ```na.rm = TRUE``` argument of the ```mean``` and ```median`` function.
+
+```{r, echo = TRUE}
+mean(data$steps, na.rm=TRUE)
+median(data$steps,na.rm=TRUE)
+```
+
+## What is the average daily activity pattern?
+
+The `data.table` package is loaded for aggregating the data.
+```{r, echo = TRUE}
+library("data.table")
+```
+
+Now the aggregation is performed. The aggregation is made on the variable `interval`, because the average steps in a certain interval over all available dates is needed. 
+
+```{r, echo = TRUE}
+data.agg <- data.table(data)[, list(avg_steps = mean(steps,na.rm=TRUE)), by = interval]
+```
+
+Now `data.agg` holds the average steps in an interval on an average day. 
+The `ggplot2` package is loaded to display the plot. 
+Also the interval is formatted for better readability
+
+```{r, echo =TRUE}
+library("ggplot2")
+interval_labels <- paste(paste(substr(sprintf("%04d", data.agg$interval),0,2),":",sep=""),substr(sprintf("%04d", data.agg$interval),3,4), sep="")
+data.agg$interval_factor <- factor(x = data.agg$interval,labels = interval_labels)
+ggplot(data.agg, aes(x = interval_factor, y = avg_steps,group= 1))+geom_line()+ylab("average steps in interval")+theme(axis.text.x=element_text(angle = -90, hjust = 0))+scale_x_discrete(breaks = interval_labels[seq(1,288,6)])+xlab("time")
+
+```
+
+## Imputing missing values
+As said, there are NA's in the data. 
+In total 
+```{r}
+dim(data[is.na(data$steps),])[1]
+```
+entries. 
+
+### Strategy
+
+The original and interval aggregated data set are merged. Then every NA step value is replaced with its interval average. 
+```{r, echo = TRUE}
+data_imputed <- merge(x = data, y = data.agg)
+data_imputed$steps <- ifelse(is.na(data_imputed$steps), data_imputed$avg_steps, data_imputed$steps)
+```
+
+Now the mean and median is calculated on the imputed data set.
+
+```{r, echo =TRUE}
+mean(data_imputed$steps)
+median(data_imputed$steps)
+```
+
+A histogram of the total steps taken each day follow. An sumation of the steps is required. The bars stand next to each other.
+
+```{r, echo =TRUE}
+data_imputed_sum <- data.table(data_imputed)[, list(sumsteps = sum(steps)), by = date]
+data_not_imputed_sum <- data.table(data)[, list(sumsteps = sum(steps)), by = date]
+data_merged_sum <- rbind(data.frame(data_imputed_sum, "type" = "imputed"), data.frame(data_not_imputed_sum, "type" = "raw"))
+
+ggplot(data_merged_sum, aes(x=sumsteps, group = type, fill =type))+geom_histogram(alpha = 0.4, stat="bin", position="dodge", binwidth=200)+xlab("Sum of steps per day")+scale_y_discrete()
+```
+
+There is a clear peak in the imputed data, because every day that was NA in the raw data (due to at least one NA), now has the average number of steps for every interval. This leads to the same mean total number of steps for every imputed day. 
+
+It is logical that only one bin of the histogram changes, because the strategy always leads to the average sum of steps for each imputed day. 
+
+## Are there differences in activity patterns between weekdays and weekends?
+This analysis runs under the assumption of an English version of R. 
+Normal language settings (for me this would be German) will lead to problems in the analysis, because the names of the weekdays obviously differ. On a Mac the settings can be changed via
+
+> Sys.setlocale(category = "LC_ALL", "en_US.UTF-8")
+
+and on a Windows PC via
+
+> Sys.setlocale("LC_ALL","English")
+
+Both commands are run to assure the right settings.
+
+```{r}
+Sys.setlocale(category = "LC_ALL", "en_US.UTF-8")
+Sys.setlocale("LC_ALL","English")
+```
+
+First a weekend variable is attached to the data set
+
+```{r, echo = TRUE}
+data_imputed$weekday <-factor(weekdays(data_imputed$date))
+```
+
+Next, the aggregation is made on the weekday **and** the interval. The appropriate labels are used again.
+
+```{r, echo = TRUE}
+data.agg2 <- data.table(data_imputed)[, list(avg_steps = mean(steps,na.rm=TRUE)), by = list(interval, weekday)]
+data.agg2$interval_factor <- factor(x = data.agg2$interval,labels = interval_labels)
+```
+
+A plot with one facet for every day shows us the different patterns. 
+
+```{r, echo =TRUE}
+ggplot(data.agg2, aes(x = interval_factor, y = avg_steps , group = weekday))+geom_line()+ylab("average steps in interval")+facet_grid(facets = weekday ~ . )+theme(axis.text.x=element_text(angle = -90, hjust = 0))+scale_x_discrete(breaks = interval_labels[seq(1,288,6)])+xlab("time")
+```
+
+Now the weekends and weekdays are put into seperate factors and a plot shows the different patterns.
+
+```{r, echo =TRUE}
+data.agg2$weekdayclass <- ifelse(data.agg2$weekday %in% c("Sunday", "Saturday"), "Weekend","Weekday")
+
+ggplot(data.agg2, aes(x = interval_factor, y = avg_steps , group = weekdayclass))+geom_line()+ylab("average steps in interval")+facet_grid(facets = weekdayclass ~ . )+theme(axis.text.x=element_text(angle = -90, hjust = 0))+scale_x_discrete(breaks = interval_labels[seq(1,288,6)])+geom_smooth(method="auto")+xlab("time")
+```
+
+The smoothing lines show that there is a difference especially in the morning. 
+
+
